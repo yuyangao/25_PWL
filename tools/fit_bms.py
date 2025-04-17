@@ -1,5 +1,6 @@
 import pickle 
 import numpy as np
+import pandas as pd
 import warnings
 import time 
 
@@ -181,9 +182,9 @@ def negloglike(params, data, agent,p_priors):
     ## loop to simulate the responses in the block 
     for _, row in data.iterrows():
         # predict stage: obtain input
-        act0    = row['act0'].astype(int)
-        act1    = row['act1'].astype(int)           
-        state1  = row['state1'].astype(int)
+        act0    = row['act0']
+        act1    = row['act1']          
+        state1  = row['state1']
         reward  = row['reward']
         # nll的计算是对每一阶段的p(action)相乘 。因为初始值为0，所以可以直接-=      
         nLL-=(np.log(subj.eval_act( 0, act0)+1e-16) \
@@ -267,6 +268,63 @@ def fit_parallel(pool, data, agent, p_name, bnds, pbnds, p_priors,
 # ------------------------------------------------------#
 #             Bayesian group level comparison           #
 # ------------------------------------------------------#
+def get_llh_score(models, 
+                  use_bic=False,
+                  relative=True):
+    '''Get likelihood socres
+
+    Inputs:
+        models: a list of models for evaluation
+    
+    Outputs:
+        crs: nll, aic and bic score per model per particiant
+        pxp: pxp score per model per particiant
+    '''
+    tar = models[0] 
+    fit_sub_info = []
+    for i, m in enumerate(models):
+        with open(f'model_comp\pkl_process\\{m}.pickle', 'rb')as handle:
+            fit_info = pickle.load(handle)
+        # get the subject list 
+        if i==0: subj_lst = fit_info.keys() 
+        # get log post
+        log_post = [fit_info[idx]['log_post'] for idx in subj_lst]
+        bic      = [fit_info[idx]['BIC'] for idx in subj_lst]
+        H        = [fit_info[idx]['H'] for idx in subj_lst] if use_bic==False else 0
+        n_param  = fit_info[list(subj_lst)[0]]['n_param']
+        fit_sub_info.append({
+            'log_post': log_post, 
+            'bic': bic, 
+            'n_param': n_param, 
+            'H': H,
+        })
+    # get bms 
+    bms_results = fit_bms(fit_sub_info, use_bic=use_bic)
+
+    ## combine into a dataframe 
+    cols = ['NLL', 'AIC', 'BIC', 'model', 'sub_id']
+    crs = {k: [] for k in cols}
+    for m in models:
+        with open(f'model_comp\pkl_process\{m}.pickle', 'rb')as handle:
+            fit_info = pickle.load(handle)
+        # get the subject list 
+        if i==0: subj_lst = fit_info.keys() 
+        # get log post
+        nll = [-fit_info[idx]['log_like'] for idx in subj_lst]
+        aic = [fit_info[idx]['AIC'] for idx in subj_lst]
+        bic = [fit_info[idx]['BIC'] for idx in subj_lst]
+        crs['NLL'] += nll
+        crs['AIC'] += aic
+        crs['BIC'] += bic
+        crs['model'] += [m]*len(nll)
+        crs['sub_id'] += list(subj_lst)
+    crs = pd.DataFrame.from_dict(crs)
+    for c in ['NLL', 'BIC', 'AIC']:
+        tar_crs = len(models)*list(crs.query(f'model=="{tar}"')[c].values)
+        subtrack = tar_crs if relative else 0
+        crs[c] -= subtrack
+    pxp = pd.DataFrame.from_dict({'pxp': bms_results['pxp'], 'model': models})
+    return crs, pxp
 
 def fit_bms(all_sub_info, use_bic=False, tol=1e-4):
     '''Fit group-level Bayesian model seletion

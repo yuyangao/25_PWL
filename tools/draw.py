@@ -5,6 +5,7 @@ import numpy as np
 import pickle
 import os
 from scipy.ndimage import gaussian_filter1d
+from tools.model_color import *
 
 ##  violin
 def violin(ax, data, x, y, order, palette, orient='v',
@@ -33,7 +34,7 @@ def violin(ax, data, x, y, order, palette, orient='v',
                             x=x, y=y, order=order, 
                             orient=orient, 
                             hue=hue, hue_order=hue_order,
-                            errorbar='sd', linewidth=1, 
+                            errorbar='se', linewidth=1, 
                             edgecolor=(0,0,0,0), facecolor=(0,0,0,0),
                             capsize=err_capsize, err_kws={'linewidth': 2.5,'color': [0.2, 0.2, 0.2]},
                             ax=ax)
@@ -139,3 +140,54 @@ def basic_format(ax, x_name, y_name):
     plt.xlabel(x_name, fontsize=10, fontdict=font)
     plt.xticks(fontsize=10)  # 更改 xtick 标签的字体大小
     plt.yticks(fontsize=10)
+
+
+def model_compare_per_participant(ax, pth, models, group, valence, n_data=None, cr='bic'):
+    crs_table = [] 
+    for m in models:
+        fname = f'{pth}/{m}/{m}_{valence}_{group}.pickle'
+        with open(fname, 'rb')as handle: fit_info = pickle.load(handle)
+        sub_lst = list(fit_info.keys())
+        if 'group' in sub_lst: sub_lst.pop(sub_lst.index('group'))
+        crs = {'sub_id': [], 'aic': [], 'bic': [], 'model': []}
+        for sub_id in sub_lst:
+            crs['sub_id'].append(sub_id)
+            crs['aic'].append(fit_info[sub_id]['AIC'])
+            crs['bic'].append(fit_info[sub_id]['BIC'])
+            crs['model'].append(m)
+        crs_table.append(pd.DataFrame.from_dict(crs))
+    crs_table = pd.concat(crs_table, axis=0, ignore_index=True)
+    sel_table = crs_table.pivot_table(
+        values=cr,
+        index='sub_id',
+        columns='model',
+        aggfunc=np.mean,
+    ).reset_index()
+    sel_table[f'min_{cr}'] = sel_table.apply(
+        lambda x: np.min([x[m] for m in models]), 
+        axis=1)
+    sort_table = sel_table.sort_values(by=f'min_{cr}').reset_index()
+    sort_table['sub_seq'] = sort_table.index
+
+    for m in models:
+        model_fn = eval(m)
+        sns.scatterplot(x='sub_seq', y=m, data=sort_table,
+                        marker=model_fn.marker,
+                        size=model_fn.size,
+                        color=model_fn.color,
+                        alpha=model_fn.alpha,
+                        linewidth=1.1,
+                        edgecolor=model_fn.color if model_fn.marker in ['o'] else 'none',
+                        facecolor='none'if model_fn.marker in ['o'] else model_fn.color,
+                        ax=ax)
+
+    #n_data = (12*8+6*8)*2
+    if n_data is not None:
+        ax.axhline(y=-np.log(1/2)*n_data*2, xmin=0, xmax=1,
+                        color='k', lw=1, ls='--')
+    ax.set_xlim([-2, sort_table.shape[0]+5])
+    ax.legend(loc='upper left')
+    ax.spines['left'].set_position(('axes',-0.02))
+    for pos in ['bottom', 'left']: ax.spines[pos].set_linewidth(2.5)
+    ax.set_xlabel(f'Participant index (sorted by the minimum {cr} score over all models)')
+    ax.set_ylabel(cr.upper())

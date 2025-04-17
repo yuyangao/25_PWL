@@ -3,11 +3,6 @@ import glob
 import pandas as pd 
 import numpy as np
 import matplotlib.pyplot as plt 
-import seaborn as sns 
-import pickle
-import csv
-import random
-import argparse
 
 from scipy.special import softmax
 from tools.fit_bms import fit_hier,fit_parallel,negloglike,fit
@@ -44,7 +39,7 @@ def preprocess(data):
     return data 
 
 def clip_exp(x):
-    x = np.clip(x, a_min=-1e15, a_max=50)
+    x = np.clip(x, a_min=-50, a_max=50)
     return np.exp(x)
 
 def sigmoid(x):
@@ -72,13 +67,12 @@ class simpleBuffer:
         '''Empty the cached trajectory'''
         self.m = {k: [] for k in self.keys}
 
-
 class hybrid:
     '''SARSA + Model-based
     pname = ['beta1', 'beta2', 'alpha1', 'alpha2', 'lmbda', 'p', 'w']
     '''
     bnds=[(0,30),(0,30),(0,1),(0,1),(0,1),(-10,10),(0,1)]
-    pbnds=[(0,20),(0,20),(0,.5),(0,.5),(0,.5),(-5,5),(0,.5)]
+    pbnds=[(0,20),(0,20),(0,.5),(0,.5),(0,.5),(-5,5),(0,1)]
     prior = [norm(2,1),norm(2,1),norm(0,1.55),norm(0,1.55),norm(0,1.55),norm(0,10),norm(0,1.55)]
     
     def __init__(self, nS, nA, params):
@@ -104,7 +98,7 @@ class hybrid:
     def eval_act(self, s, a):
         q_mf = self.Q_mf[s, :]
         q_mb = self.Q_mb[s, :]    
-        q_net = self.w*q_mb + (1-self.w)*q_mf
+        q_net = self.w * q_mb + (1-self.w) * q_mf
         beta = self.beta1 if s==0 else self.beta2           # inverse temperature beta2
         q = q_net + self.p*self.rep_a                       # 
         pi = softmax(beta*q)
@@ -125,8 +119,7 @@ class hybrid:
         # model-based update
         # level 2 is identical to model-free
         self.Q_mb[s2, a2] += self.alpha2*delta2
-        self.Q_mb[s1, :] = (self.P@np.max(self.Q_mb, axis=1, keepdims=True)).reshape([-1])
-        
+        self.Q_mb[s1, :] = (self.P @ np.max(self.Q_mb, axis = 1, keepdims=True)).reshape([-1])        
        
         # update perseveration
         self.rep_a = np.eye(self.nA)[a1]      
@@ -152,7 +145,7 @@ agent = hybrid
 if __name__ == '__main__':
 
     pool = get_pool(args=arg)
-    file_path = 'reward'
+    file_path = 'param_rev'
     dir_iterator = os.scandir(file_path)
     pname = ['beta1', 'beta2', 'alpha1', 'alpha2', 'lmbda', 'p', 'w']
     
